@@ -8,7 +8,7 @@ from dotenv import load_dotenv
 class ZhipuSearchTool:
     """智谱AI搜索工具"""
     
-    def __init__(self, api_key: str = None):
+    def __init__(self, api_key: Optional[str] = None):
         """
         初始化智谱搜索工具
         
