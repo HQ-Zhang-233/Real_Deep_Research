@@ -3,6 +3,7 @@ import asyncio
 import requests
 import re
 from youtube_transcript_api import YouTubeTranscriptApi
+from processors.web_content_processor import WebContentProcessor
 
 class WebReader:
     """网页内容阅读工具"""
@@ -10,6 +11,7 @@ class WebReader:
     def __init__(self):
         """初始化网页阅读工具"""
         self.jina_base_url = "https://r.jina.ai/"
+        self.content_processor = WebContentProcessor()
 
     async def read_pages(self, urls: List[str]) -> List[Dict]:
         """批量读取多个网页的内容"""
@@ -44,7 +46,10 @@ class WebReader:
         try:
             response = requests.get(f"{self.jina_base_url}{url}")
             response.raise_for_status()
-            return response.text
+            raw_content = response.text
+            # 使用WebContentProcessor优化网页内容
+            processed_content = await self.content_processor.process_web_content(raw_content)
+            return processed_content
         except Exception as e:
             print(f"获取页面内容失败: {str(e)}")
             return ''

@@ -1,0 +1,10 @@
+[
+  {
+    "role": "user",
+    "content": "我想要研究下deep research这类产品"
+  },
+  {
+    "role": "assistant",
+    "content": "```xml\n<planning>\n用户提出了关于 \"deep research products\" 的研究需求。  根据乔哈里视窗框架，这属于 **未知区**。  我的规划思路是：\n\n1. **初步探索 (未知区 -> 隐藏区):** 使用 Quick Search Tool 快速搜索 \"deep research products\"，了解这类产品的基本概念、应用场景和市场概况。  这将帮助我从完全未知进入到初步了解的阶段。\n\n2. **构建初步任务清单 (隐藏区 -> 开放区):** 基于 Quick Search 的结果，构建一个初步的 Todo List，包含信息收集、分析和报告撰写等阶段，并列出一些初步的研究任务。  例如，定义 \"deep research products\"、调研现有产品案例、分析产品特点和应用场景等。\n\n3. **用户沟通与需求澄清 (隐藏区/盲区 -> 开放区):**  向用户展示初步的 Todo List，并主动提问，引导用户澄清其研究的具体方向和重点。  例如，询问用户对 \"deep research products\" 的哪些方面更感兴趣 (例如，产品功能、技术实现、应用场景、市场前景等)。  根据用户的反馈，进一步完善和调整研究规划和任务清单。\n\n**初始 Quick Search 关键词:** \"deep research products\"\n</planning>\n\n<quick_search query=\"deep research products\"></quick_search>\n```"
+  }
+]

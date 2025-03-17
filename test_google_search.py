@@ -5,7 +5,7 @@ def main():
     google_search = GoogleSearch()
     
     # 设置搜索查询
-    query = "manus AI"
+    query = "github jina-ai node-DeepResearch"
     
     print(f"\n执行搜索查询: {query}")
     result = google_search.search(query)
