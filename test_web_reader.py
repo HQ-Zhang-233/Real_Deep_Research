@@ -3,7 +3,7 @@ from tools.web_reader import WebReader
 
 def main():
     web_reader = WebReader()
-    url = "https://github.com/sambanova/agents/tree/main/"
+    url = "https://www.youtube.com/watch?v=2PSCnOFkR3U&t=3s&ab_channel=%E7%A1%85%E8%B0%B7101"
     
     print(f"\n正在读取网页: {url}")
     result = asyncio.run(web_reader.read_page(url))

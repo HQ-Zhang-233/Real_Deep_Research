@@ -1,1 +1,24 @@
-.env 
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Tests
+test_*.py
+
+# IDE
+.idea/
+
+# Virtual Environment
+.venv/
+
+# Logs
+*.log
+logs/
+
+# Task outputs
+tasks/*/chat_history/
+tasks/*/documents/
+tasks/*/logs/

@@ -7,6 +7,9 @@ from typing import Dict, List, Optional, Tuple
 from openai import AsyncOpenAI
 from config.prompts.planner_agent_prompt import get_default_prompt
 from tools.google_search import GoogleSearch
+from processors.text_processor import TextProcessor
+from agent.search_agent import SearchAgent
+from agent.writing_agent import WritingAgent
 
 class ControllerAgent:
     """主控Agent，负责处理用户输入并与模型交互"""
@@ -18,10 +21,13 @@ class ControllerAgent:
         """
         self.client = None
         self.google_search = None
+        self.text_processor = None
         self.tasks_dir = None
         self.current_task_id = None
         self.chat_history = []
         self.logger = None
+        self.search_agent = None
+        self.writing_agent = None
         self._init_task = self.async_init(task_id)
 
     def _setup_logger(self):
@@ -44,17 +50,11 @@ class ControllerAgent:
         file_handler = logging.FileHandler(log_file, encoding='utf-8')
         file_handler.setLevel(logging.DEBUG)
         
-        # 控制台处理器
-        console_handler = logging.StreamHandler()
-        console_handler.setLevel(logging.INFO)
-        
         # 设置日志格式
         formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
         file_handler.setFormatter(formatter)
-        console_handler.setFormatter(formatter)
         
         self.logger.addHandler(file_handler)
-        self.logger.addHandler(console_handler)
 
     async def async_init(self, task_id: Optional[str] = None):
         """异步初始化
@@ -68,6 +68,8 @@ class ControllerAgent:
         )
         # 初始化Google搜索工具
         self.google_search = GoogleSearch()
+        # 初始化文本处理器
+        self.text_processor = TextProcessor()
         # 创建任务根目录
         self.tasks_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'tasks')
         os.makedirs(self.tasks_dir, exist_ok=True)
@@ -82,19 +84,10 @@ class ControllerAgent:
         if task_id:
             await self._load_chat_history()
     
-    def extract_xml_tags(self, text: str) -> Dict[str, str]:
+    def extract_xml_tags(self, text: str) -> Dict[str, list]:
         """提取所有XML标签内容，包括带属性的标签"""
-        # 每次调用时重新初始化结果字典
-        result = {}
-        # 使用正则表达式匹配所有XML标签，包括带属性的标签
-        pattern = re.compile(r'<([^\s>]+)[^>]*>(?:([^<]*)|.*?</\1>)', re.DOTALL)
-        matches = pattern.findall(text)
-        
-        # 将所有标签内容存储到字典中
-        for tag_name, content in matches:
-            content = content.strip()
-            
-        return result
+        from processors.xml_parser import extract_xml_tags
+        return extract_xml_tags(text)
 
     def _ensure_task_directory(self) -> str:
         """确保任务目录存在并返回当前任务目录路径"""
@@ -143,8 +136,13 @@ class ControllerAgent:
             print(f"加载聊天历史时发生错误: {str(e)}")
             self.chat_history = []
     
-    async def _process_model_response(self, input_content: str) -> str:
-        """处理模型响应并执行必要的工具调用"""
+    async def _process_model_response(self, input_content: Optional[str] = None) -> str:
+        """处理模型响应并执行必要的工具调用
+        Args:
+            input_content: 用户输入内容，可选参数
+        Returns:
+            str: 处理后的响应内容
+        """
         # 构建消息列表
         messages = [
             {"role": "system", "content": get_default_prompt()}
@@ -155,7 +153,7 @@ class ControllerAgent:
         
         # 获取模型响应
         response = await self.client.chat.completions.create(
-            model="gemini-2.0-flash-thinking-exp-01-21",
+            model="gemini-2.5-pro-exp-03-25",
             n=1,
             messages=messages
         )
@@ -163,7 +161,7 @@ class ControllerAgent:
         model_response = response.choices[0].message.content
         if self.logger:
             self.logger.info(f"模型原始响应:\n{model_response}")
-        
+            
         self.chat_history.append({"role": "assistant", "content": model_response})
         
         # 提取标签内容
@@ -171,40 +169,12 @@ class ControllerAgent:
         if self.logger:
             self.logger.debug(f"提取的标签内容: {tags}")
         
-        # 如果需要执行工具调用
-        if 'quick_search' in tags:
-            if self.logger:
-                self.logger.info("执行快速搜索工具调用")
-            # 执行搜索并收集结果
-            search_results = []
-            query_matches = re.finditer(r'<quick_search[^>]*query="([^"]+)"[^>]*>', model_response)
-            
-            for match in query_matches:
-                query = match.group(1)
-                if self.logger:
-                    self.logger.debug(f"搜索查询: {query}")
-                result = self.google_search.search(query)
-                search_results.append({"query": query, "result": result})
-                
-                # 将搜索结果添加到历史记录
-                self.chat_history.append({
-                    "role": "user",
-                    "content": f"Quick Search Results for '{query}':\n{str(result)}"
-                })
-            
-            # 如果有搜索结果，递归处理新的响应
-            if search_results:
-                if self.logger:
-                    self.logger.debug(f"搜索结果: {search_results}")
-                return await self._process_model_response(input_content)
-        
         # 处理todo_list标签
         if 'todo_list' in tags:
             if self.logger:
                 self.logger.info("处理todo_list标签")
-            todo_content = tags['todo_list']
-            # 临时的俄语解析器函数
-            processed_content = self._temp_russian_processor(todo_content)
+            # 由于xml_parser返回的是列表，取第一个元素作为内容
+            todo_content = tags['todo_list'][0] if tags['todo_list'] else ""
             
             # 确保任务目录存在
             task_dir = self._ensure_task_directory()
@@ -214,13 +184,92 @@ class ControllerAgent:
             
             # 保存处理后的todo list
             with open(filepath, 'w', encoding='utf-8') as f:
-                f.write(processed_content)
+                f.write(todo_content)
             
             if self.logger:
                 self.logger.debug(f"保存todo list到: {filepath}")
+
+        # 如果需要执行写作代理调用
+        if 'writing_agent' in tags:
+            if self.logger:
+                self.logger.info("执行写作代理调用")
+            # 获取写作任务描述
+            writing_task = tags.get('writing_agent', [""])[0]
+            # 调用写作代理处理任务
+            writing_agent = WritingAgent(task_id=self.current_task_id)
+            writing_result = await writing_agent.process_writing_task(writing_task)
+            # 显式解除引用
+            writing_agent = None
+            # 将写作结果添加到历史记录
+            self.chat_history.append({
+                "role": "user",
+                "content": f"Writing Agent Results:\n{str(writing_result)}"
+            })
+            # 递归处理新的响应
+            return await self._process_model_response()
+            
+        # 如果需要执行搜索代理调用
+        if 'search_agent' in tags:
+            if self.logger:
+                self.logger.info("执行搜索代理调用")
+            # 获取搜索任务描述
+            search_agent_tags = tags.get('search_agent', [])
+            if not search_agent_tags:
+                if self.logger:
+                    self.logger.error("搜索代理标签内容为空")
+                return "搜索代理标签内容为空，请检查输入"
+                
+            search_task = search_agent_tags[0]
+            if not search_task:
+                if self.logger:
+                    self.logger.error("搜索任务描述为空")
+                return "搜索任务描述为空，请检查输入"
+                
+            # 调用搜索代理处理任务
+            if self.logger:
+                self.logger.info(f"执行搜索任务: {search_task}")
+            # 每次调用时新建SearchAgent实例
+            search_agent = SearchAgent(task_id=self.current_task_id)
+            search_result = await search_agent.process_search_task(search_task)
+            # 将搜索结果添加到历史记录
+            self.chat_history.append({
+                "role": "user",
+                "content": f"Search Agent Results:\n{str(search_result)}"
+            })
+            # 递归处理新的响应
+            return await self._process_model_response()
+            
+        # 如果需要执行工具调用
+        if 'quick_search' in tags:
+            if self.logger:
+                self.logger.info("执行快速搜索工具调用")
+            # 执行搜索并收集结果
+            search_results = []
+            for query_str in tags['quick_search']:
+                # 将搜索关键词按逗号分隔并去除空格
+                queries = [q.strip() for q in query_str.split(',') if q.strip()]
+                
+                for query in queries:
+                    if self.logger:
+                        self.logger.debug(f"搜索查询: {query}")
+                    result = self.google_search.search(query)
+                    search_results.append({"query": query, "result": result})
+                    
+                    # 将搜索结果添加到历史记录
+                    self.chat_history.append({
+                        "role": "user",
+                        "content": f"Quick Search Results for '{query}':\n{str(result)}"
+                    })
+            
+            # 如果有搜索结果，递归处理新的响应
+            if search_results:
+                if self.logger:
+                    self.logger.debug(f"搜索结果: {search_results}")
+                return await self._process_model_response()
         
-        # 返回用户消息或空字符串
-        return tags.get("message_ask_user", "")
+        
+        # 返回用户消息或空字符串，同样取列表的第一个元素
+        return tags.get("message_ask_user", [""])[0] if "message_ask_user" in tags else ""
 
     async def process_input(self, user_input: str) -> str:
         """处理用户输入并返回响应
@@ -245,8 +294,3 @@ class ControllerAgent:
             self.logger.info(f"返回给用户的响应: {response}")
         
         return response
-    
-    def _temp_russian_processor(self, content: str) -> str:
-        """临时的俄语处理器，后续会替换为真实的实现"""
-        # 这里仅返回原始内容，后续会实现真正的俄语处理逻辑
-        return content

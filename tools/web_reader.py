@@ -2,8 +2,13 @@ from typing import List, Dict, Optional
 import asyncio
 import requests
 import re
-from youtube_transcript_api import YouTubeTranscriptApi
+import requests
 from processors.web_content_processor import WebContentProcessor
+import os
+from dotenv import load_dotenv
+
+# 加载环境变量
+load_dotenv()
 
 class WebReader:
     """网页内容阅读工具"""
@@ -68,28 +73,42 @@ class WebReader:
         return None
 
     def _get_best_transcript(self, video_id: str) -> Optional[str]:
-        """获取视频的最佳字幕，无重试机制"""
+        """使用Coze API获取视频字幕"""
         try:
-            transcript_list = YouTubeTranscriptApi.list_transcripts(video_id)
+            # 从环境变量获取Coze API配置
+            api_token = os.getenv('COZE_API_TOKEN')
+            workflow_id = os.getenv('COZE_WORKFLOW_ID')
             
-            # 优先尝试获取英文或中文字幕
-            for lang in ['en', 'zh']:
-                try:
-                    transcript = transcript_list.find_transcript([lang])
-                    return ' '.join([entry['text'] for entry in transcript.fetch()])
-                except:
-                    continue
-            
-            # 如果没有英文和中文，获取任意一个可用的字幕
-            try:
-                transcript = transcript_list.find_manually_created_transcript(['en', 'zh'])
-                return ' '.join([entry['text'] for entry in transcript.fetch()])
-            except:
-                generated_transcripts = list(transcript_list._generated_transcripts.values())
-                if generated_transcripts:
-                    transcript = generated_transcripts[0]
-                    return ' '.join([entry['text'] for entry in transcript.fetch()])
+            if not api_token or not workflow_id:
+                print("缺少Coze API配置")
                 return None
+            
+            # 准备请求数据
+            url = 'https://api.coze.com/v1/workflow/run'
+            headers = {
+                'Authorization': f'Bearer {api_token}',
+                'Content-Type': 'application/json'
+            }
+            data = {
+                'parameters': {
+                    'video_id': video_id
+                },
+                'workflow_id': workflow_id
+            }
+            
+            # 发送请求
+            response = requests.post(url, headers=headers, json=data)
+            response.raise_for_status()
+            
+            # 解析响应
+            result = response.json()
+            if result.get('code') == 0 and result.get('data'):
+                # 解析data字段中的JSON字符串
+                import json
+                caption_data = json.loads(result['data'])
+                return caption_data.get('caption', '')
+            
+            return None
 
         except Exception as e:
             print(f"无法获取视频 {video_id} 的字幕: {str(e)}")

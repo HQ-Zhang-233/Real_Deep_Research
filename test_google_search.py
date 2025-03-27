@@ -5,7 +5,7 @@ def main():
     google_search = GoogleSearch()
     
     # 设置搜索查询
-    query = "github jina-ai node-DeepResearch"
+    query = "open source AI research tools"
     
     print(f"\n执行搜索查询: {query}")
     result = google_search.search(query)
