@@ -189,6 +189,54 @@ class ControllerAgent:
             if self.logger:
                 self.logger.debug(f"保存todo list到: {filepath}")
 
+        # 处理file_read标签
+        if 'file_read' in tags:
+            if self.logger:
+                self.logger.info("执行文件读取工具调用")
+                
+            file_contents = []
+            for file_paths_str in tags['file_read']:
+                # 将文件路径按逗号分隔并去除空格
+                file_paths = [p.strip() for p in file_paths_str.split(',') if p.strip()]
+                
+                for file_path in file_paths:
+                    if self.logger:
+                        self.logger.debug(f"读取文件: {file_path}")
+                    # 读取文件内容
+                    task_dir = self._ensure_task_directory()
+                    # 如果传入的是完整路径，直接使用
+                    if os.path.isabs(file_path):
+                        final_path = file_path
+                    # 如果路径中已包含documents目录，只需要拼接task_dir
+                    elif 'documents' in file_path:
+                        final_path = os.path.join(task_dir, file_path)
+                    else:
+                        # 否则按照当前逻辑拼接task_dir和documents目录
+                        final_path = os.path.join(task_dir, 'documents', file_path)
+                    
+                    try:
+                        with open(final_path, 'r', encoding='utf-8') as f:
+                            file_content = f.read()
+                            file_contents.append({"path": file_path, "content": file_content})
+                            
+                            # 将文件内容添加到历史记录
+                            self.chat_history.append({
+                                "role": "user",
+                                "content": f"File Content ({file_path}):\n{file_content}"
+                            })
+                            
+                            if self.logger:
+                                self.logger.debug(f"Successfully read file: {final_path}")
+                    except Exception as e:
+                        if self.logger:
+                            self.logger.error(f"Error reading file {file_path}: {str(e)}")
+            
+            # 如果有读取到文件内容，递归处理新的响应
+            if file_contents:
+                if self.logger:
+                    self.logger.debug(f"文件读取结果: {file_contents}")
+                return await self._process_model_response()
+
         # 如果需要执行写作代理调用
         if 'writing_agent' in tags:
             if self.logger:
