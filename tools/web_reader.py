@@ -113,3 +113,27 @@ class WebReader:
         except Exception as e:
             print(f"无法获取视频 {video_id} 的字幕: {str(e)}")
             return None
+
+def test_smry_ai():
+    # 测试用的原始URL
+    original_url = "https://www.example.com"
+    
+    # 构建smry.ai的URL
+    smry_url = f"https://smry.ai/{original_url}"
+    
+    try:
+        # 发送GET请求
+        response = requests.get(smry_url)
+        
+        # 检查响应状态
+        if response.status_code == 200:
+            print("成功获取内容！")
+            print("返回内容:", response.text[:500])  # 只打印前500个字符
+        else:
+            print(f"请求失败，状态码: {response.status_code}")
+            
+    except Exception as e:
+        print(f"发生错误: {str(e)}")
+
+if __name__ == "__main__":
+    test_smry_ai()

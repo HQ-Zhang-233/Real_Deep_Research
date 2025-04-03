@@ -143,181 +143,192 @@ class ControllerAgent:
         Returns:
             str: 处理后的响应内容
         """
-        # 构建消息列表
-        messages = [
-            {"role": "system", "content": get_default_prompt()}
-        ] + self.chat_history
-        
-        if self.logger:
-            self.logger.debug(f"发送给模型的消息列表: {messages}")
-        
-        # 获取模型响应
-        response = await self.client.chat.completions.create(
-            model="gemini-2.5-pro-exp-03-25",
-            n=1,
-            messages=messages
-        )
-        
-        model_response = response.choices[0].message.content
-        if self.logger:
-            self.logger.info(f"模型原始响应:\n{model_response}")
-            
-        self.chat_history.append({"role": "assistant", "content": model_response})
-        
-        # 提取标签内容
-        tags = self.extract_xml_tags(model_response)
-        if self.logger:
-            self.logger.debug(f"提取的标签内容: {tags}")
-        
-        # 处理todo_list标签
-        if 'todo_list' in tags:
-            if self.logger:
-                self.logger.info("处理todo_list标签")
-            # 由于xml_parser返回的是列表，取第一个元素作为内容
-            todo_content = tags['todo_list'][0] if tags['todo_list'] else ""
-            
-            # 确保任务目录存在
-            task_dir = self._ensure_task_directory()
-            
-            # 使用固定的todo list文件名
-            filepath = os.path.join(task_dir, 'documents', 'todo_list.md')
-            
-            # 保存处理后的todo list
-            with open(filepath, 'w', encoding='utf-8') as f:
-                f.write(todo_content)
+        try:
+            # 构建消息列表
+            messages = [
+                {"role": "system", "content": get_default_prompt()}
+            ] + self.chat_history
             
             if self.logger:
-                self.logger.debug(f"保存todo list到: {filepath}")
+                self.logger.debug(f"发送给模型的消息列表: {messages}")
+            
+            # 获取模型响应
+            response = await self.client.chat.completions.create(
+                model="gemini-2.0-flash-thinking-exp-01-21",
+                n=1,
+                messages=messages
+            )
+            
+            model_response = response.choices[0].message.content
+            if self.logger:
+                self.logger.info(f"模型原始响应:\n{model_response}")
+                
+            self.chat_history.append({"role": "assistant", "content": model_response})
+            self._save_chat_history()  # 保存模型响应后的对话历史
+            
+            # 提取标签内容
+            tags = self.extract_xml_tags(model_response)
+            if self.logger:
+                self.logger.debug(f"提取的标签内容: {tags}")
+            
+            # 处理todo_list标签
+            if 'todo_list' in tags:
+                if self.logger:
+                    self.logger.info("处理todo_list标签")
+                # 由于xml_parser返回的是列表，取第一个元素作为内容
+                todo_content = tags['todo_list'][0] if tags['todo_list'] else ""
+                
+                # 确保任务目录存在
+                task_dir = self._ensure_task_directory()
+                
+                # 使用固定的todo list文件名
+                filepath = os.path.join(task_dir, 'documents', 'todo_list.md')
+                
+                # 保存处理后的todo list
+                with open(filepath, 'w', encoding='utf-8') as f:
+                    f.write(todo_content)
+                
+                if self.logger:
+                    self.logger.debug(f"保存todo list到: {filepath}")
 
-        # 处理file_read标签
-        if 'file_read' in tags:
-            if self.logger:
-                self.logger.info("执行文件读取工具调用")
-                
-            file_contents = []
-            for file_paths_str in tags['file_read']:
-                # 将文件路径按逗号分隔并去除空格
-                file_paths = [p.strip() for p in file_paths_str.split(',') if p.strip()]
-                
-                for file_path in file_paths:
-                    if self.logger:
-                        self.logger.debug(f"读取文件: {file_path}")
-                    # 读取文件内容
-                    task_dir = self._ensure_task_directory()
-                    # 如果传入的是完整路径，直接使用
-                    if os.path.isabs(file_path):
-                        final_path = file_path
-                    # 如果路径中已包含documents目录，只需要拼接task_dir
-                    elif 'documents' in file_path:
-                        final_path = os.path.join(task_dir, file_path)
-                    else:
-                        # 否则按照当前逻辑拼接task_dir和documents目录
-                        final_path = os.path.join(task_dir, 'documents', file_path)
+            # 处理file_read标签
+            if 'file_read' in tags:
+                if self.logger:
+                    self.logger.info("执行文件读取工具调用")
                     
-                    try:
-                        with open(final_path, 'r', encoding='utf-8') as f:
-                            file_content = f.read()
-                            file_contents.append({"path": file_path, "content": file_content})
-                            
-                            # 将文件内容添加到历史记录
-                            self.chat_history.append({
-                                "role": "user",
-                                "content": f"File Content ({file_path}):\n{file_content}"
-                            })
-                            
-                            if self.logger:
-                                self.logger.debug(f"Successfully read file: {final_path}")
-                    except Exception as e:
+                file_contents = []
+                for file_paths_str in tags['file_read']:
+                    # 将文件路径按逗号分隔并去除空格
+                    file_paths = [p.strip() for p in file_paths_str.split(',') if p.strip()]
+                    
+                    for file_path in file_paths:
                         if self.logger:
-                            self.logger.error(f"Error reading file {file_path}: {str(e)}")
-            
-            # 如果有读取到文件内容，递归处理新的响应
-            if file_contents:
-                if self.logger:
-                    self.logger.debug(f"文件读取结果: {file_contents}")
-                return await self._process_model_response()
-
-        # 如果需要执行写作代理调用
-        if 'writing_agent' in tags:
-            if self.logger:
-                self.logger.info("执行写作代理调用")
-            # 获取写作任务描述
-            writing_task = tags.get('writing_agent', [""])[0]
-            # 调用写作代理处理任务
-            writing_agent = WritingAgent(task_id=self.current_task_id)
-            writing_result = await writing_agent.process_writing_task(writing_task)
-            # 显式解除引用
-            writing_agent = None
-            # 将写作结果添加到历史记录
-            self.chat_history.append({
-                "role": "user",
-                "content": f"Writing Agent Results:\n{str(writing_result)}"
-            })
-            # 递归处理新的响应
-            return await self._process_model_response()
-            
-        # 如果需要执行搜索代理调用
-        if 'search_agent' in tags:
-            if self.logger:
-                self.logger.info("执行搜索代理调用")
-            # 获取搜索任务描述
-            search_agent_tags = tags.get('search_agent', [])
-            if not search_agent_tags:
-                if self.logger:
-                    self.logger.error("搜索代理标签内容为空")
-                return "搜索代理标签内容为空，请检查输入"
+                            self.logger.debug(f"读取文件: {file_path}")
+                        # 读取文件内容
+                        task_dir = self._ensure_task_directory()
+                        # 如果传入的是完整路径，直接使用
+                        if os.path.isabs(file_path):
+                            final_path = file_path
+                        # 如果路径中已包含documents目录，只需要拼接task_dir
+                        elif 'documents' in file_path:
+                            final_path = os.path.join(task_dir, file_path)
+                        else:
+                            # 否则按照当前逻辑拼接task_dir和documents目录
+                            final_path = os.path.join(task_dir, 'documents', file_path)
+                        
+                        try:
+                            with open(final_path, 'r', encoding='utf-8') as f:
+                                file_content = f.read()
+                                file_contents.append({"path": file_path, "content": file_content})
+                                
+                                # 将文件内容添加到历史记录
+                                self.chat_history.append({
+                                    "role": "user",
+                                    "content": f"File Content ({file_path}):\n{file_content}"
+                                })
+                                self._save_chat_history()  # 保存文件内容后的对话历史
+                                
+                                if self.logger:
+                                    self.logger.debug(f"Successfully read file: {final_path}")
+                        except Exception as e:
+                            if self.logger:
+                                self.logger.error(f"Error reading file {file_path}: {str(e)}")
                 
-            search_task = search_agent_tags[0]
-            if not search_task:
-                if self.logger:
-                    self.logger.error("搜索任务描述为空")
-                return "搜索任务描述为空，请检查输入"
-                
-            # 调用搜索代理处理任务
-            if self.logger:
-                self.logger.info(f"执行搜索任务: {search_task}")
-            # 每次调用时新建SearchAgent实例
-            search_agent = SearchAgent(task_id=self.current_task_id)
-            search_result = await search_agent.process_search_task(search_task)
-            # 将搜索结果添加到历史记录
-            self.chat_history.append({
-                "role": "user",
-                "content": f"Search Agent Results:\n{str(search_result)}"
-            })
-            # 递归处理新的响应
-            return await self._process_model_response()
-            
-        # 如果需要执行工具调用
-        if 'quick_search' in tags:
-            if self.logger:
-                self.logger.info("执行快速搜索工具调用")
-            # 执行搜索并收集结果
-            search_results = []
-            for query_str in tags['quick_search']:
-                # 将搜索关键词按逗号分隔并去除空格
-                queries = [q.strip() for q in query_str.split(',') if q.strip()]
-                
-                for query in queries:
+                # 如果有读取到文件内容，递归处理新的响应
+                if file_contents:
                     if self.logger:
-                        self.logger.debug(f"搜索查询: {query}")
-                    result = self.google_search.search(query)
-                    search_results.append({"query": query, "result": result})
-                    
-                    # 将搜索结果添加到历史记录
-                    self.chat_history.append({
-                        "role": "user",
-                        "content": f"Quick Search Results for '{query}':\n{str(result)}"
-                    })
-            
-            # 如果有搜索结果，递归处理新的响应
-            if search_results:
+                        self.logger.debug(f"文件读取结果: {file_contents}")
+                    return await self._process_model_response()
+
+            # 如果需要执行写作代理调用
+            if 'writing_agent' in tags:
                 if self.logger:
-                    self.logger.debug(f"搜索结果: {search_results}")
+                    self.logger.info("执行写作代理调用")
+                # 获取写作任务描述
+                writing_task = tags.get('writing_agent', [""])[0]
+                # 调用写作代理处理任务
+                writing_agent = WritingAgent(task_id=self.current_task_id)
+                writing_result = await writing_agent.process_writing_task(writing_task)
+                # 显式解除引用
+                writing_agent = None
+                # 将写作结果添加到历史记录
+                self.chat_history.append({
+                    "role": "user",
+                    "content": f"Writing Agent Results:\n{str(writing_result)}"
+                })
+                self._save_chat_history()  # 保存写作结果后的对话历史
+                # 递归处理新的响应
                 return await self._process_model_response()
-        
-        
-        # 返回用户消息或空字符串，同样取列表的第一个元素
-        return tags.get("message_ask_user", [""])[0] if "message_ask_user" in tags else ""
+                
+            # 如果需要执行搜索代理调用
+            if 'search_agent' in tags:
+                if self.logger:
+                    self.logger.info("执行搜索代理调用")
+                # 获取搜索任务描述
+                search_agent_tags = tags.get('search_agent', [])
+                if not search_agent_tags:
+                    if self.logger:
+                        self.logger.error("搜索代理标签内容为空")
+                    return "搜索代理标签内容为空，请检查输入"
+                    
+                search_task = search_agent_tags[0]
+                if not search_task:
+                    if self.logger:
+                        self.logger.error("搜索任务描述为空")
+                    return "搜索任务描述为空，请检查输入"
+                    
+                # 调用搜索代理处理任务
+                if self.logger:
+                    self.logger.info(f"执行搜索任务: {search_task}")
+                # 每次调用时新建SearchAgent实例
+                search_agent = SearchAgent(task_id=self.current_task_id)
+                search_result = await search_agent.process_search_task(search_task)
+                # 将搜索结果添加到历史记录
+                self.chat_history.append({
+                    "role": "user",
+                    "content": f"Search Agent Results:\n{str(search_result)}"
+                })
+                self._save_chat_history()  # 保存搜索结果后的对话历史
+                # 递归处理新的响应
+                return await self._process_model_response()
+                
+            # 如果需要执行工具调用
+            if 'quick_search' in tags:
+                if self.logger:
+                    self.logger.info("执行快速搜索工具调用")
+                # 执行搜索并收集结果
+                search_results = []
+                for query_str in tags['quick_search']:
+                    # 将搜索关键词按逗号分隔并去除空格
+                    queries = [q.strip() for q in query_str.split(',') if q.strip()]
+                    
+                    for query in queries:
+                        if self.logger:
+                            self.logger.debug(f"搜索查询: {query}")
+                        result = self.google_search.search(query)
+                        search_results.append({"query": query, "result": result})
+                        
+                        # 将搜索结果添加到历史记录
+                        self.chat_history.append({
+                            "role": "user",
+                            "content": f"Quick Search Results for '{query}':\n{str(result)}"
+                        })
+                        self._save_chat_history()  # 保存搜索结果后的对话历史
+                
+                # 如果有搜索结果，递归处理新的响应
+                if search_results:
+                    if self.logger:
+                        self.logger.debug(f"搜索结果: {search_results}")
+                    return await self._process_model_response()
+            
+            # 返回用户消息或空字符串，同样取列表的第一个元素
+            return tags.get("message_ask_user", [""])[0] if "message_ask_user" in tags else ""
+            
+        except Exception as e:
+            if self.logger:
+                self.logger.error(f"处理模型响应时发生错误: {str(e)}")
+            self._save_chat_history()  # 发生异常时也要保存对话历史
+            raise  # 重新抛出异常
 
     async def process_input(self, user_input: str) -> str:
         """处理用户输入并返回响应

@@ -5,6 +5,7 @@
 
 import os
 import logging
+import json
 from typing import Dict, List, Optional
 from openai import AsyncOpenAI
 from processors.xml_parser import extract_xml_tags
@@ -84,6 +85,7 @@ class WritingAgent:
         tasks_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'tasks')
         task_dir = os.path.join(tasks_dir, self.task_id)
         os.makedirs(os.path.join(task_dir, 'documents'), exist_ok=True)
+        os.makedirs(os.path.join(task_dir, 'chat_history'), exist_ok=True)
         return task_dir
     
     def _read_document(self, doc_path: str) -> str:
@@ -190,13 +192,22 @@ class WritingAgent:
                                    for name, content in doc_contents.items()])
         
         # 获取模型响应
+        system_prompt = get_writing_agent_prompt(todo_list, document_list, doc_previews)
+        messages_to_send = [{"role": "system", "content": system_prompt}, {"role": "user", "content": task_description}] + self.chat_history
+
         if self.logger:
-            self.logger.debug(f"发送给模型的消息列表: {self.chat_history}")
+            # Log the messages being sent, including history
+            self.logger.debug(f"发送给模型的消息列表:\nSystem Prompt: [Prompt content omitted for brevity]\nTask Description: {task_description}\nChat History: {self.chat_history}")
+
+        # Prepend initial messages to history *only once*
+        if not self.chat_history:
+             self.chat_history.append({"role": "system", "content": system_prompt})
+             self.chat_history.append({"role": "user", "content": task_description})
             
         response = await self.client.chat.completions.create(
-            model="gemini-2.5-pro-exp-03-25",
+            model="gemini-2.0-flash-thinking-exp-01-21",
             n=1,
-            messages=[{"role": "system", "content": get_writing_agent_prompt(todo_list, document_list, doc_previews)}, {"role": "user", "content": task_description}] + self.chat_history
+            messages=messages_to_send
         )
         
         model_response = response.choices[0].message.content
@@ -250,6 +261,7 @@ class WritingAgent:
             # 获取report内容
             report_content = tags['report'][0] if tags['report'] else ""
             
+            # 保存report到任务目录
             if task_dir:
                 # 从任务描述中提取文档名称
                 doc_name = await self.extract_doc_name_from_task(task_description)
@@ -258,6 +270,29 @@ class WritingAgent:
                     self.logger.debug(f"保存report到: {report_path}")
                 with open(report_path, 'w', encoding='utf-8') as f:
                     f.write(report_content)
+                    
+                # Save chat history after saving the report
+                chat_history_dir = os.path.join(task_dir, 'chat_history')
+                chat_history_file = os.path.join(chat_history_dir, 'writing_agent_chat_history.json')
+                if self.logger:
+                    self.logger.debug(f"保存对话历史到: {chat_history_file}")
+                try:
+                    with open(chat_history_file, 'w', encoding='utf-8') as f_hist:
+                        json.dump(self.chat_history, f_hist, ensure_ascii=False, indent=4)
+                except Exception as e:
+                     if self.logger:
+                        self.logger.error(f"保存对话历史失败: {e}")
+                        
+                # 只有在成功保存report时才返回最终结果
+                result = {
+                    "status": "success",
+                    "task_completed": True,
+                    "documents": {
+                        "report_path": report_path if 'report' in tags and task_dir else None
+                    },
+                    "source": "writing_agent"
+                }
+                return result
         
         # 返回最终结果
         result = {

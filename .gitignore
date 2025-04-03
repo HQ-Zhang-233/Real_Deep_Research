@@ -22,3 +22,16 @@ logs/
 tasks/*/chat_history/
 tasks/*/documents/
 tasks/*/logs/
+# Frontend
+frontend/
+*.html
+*.css
+*.js
+*.jsx
+*.ts
+*.tsx
+node_modules/
+dist/
+build/
+package-lock.json
+yarn.lock
